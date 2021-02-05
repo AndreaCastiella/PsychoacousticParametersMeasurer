@@ -1,6 +1,7 @@
 # Loudness ISO 532
 # Metodo para sonidos estacionarios y variables con el tiempo
 import numpy as np
+import filtertime
 
 constantes = {
     'SR_LEVEL': 2000,
@@ -297,7 +298,7 @@ def f_nl(coreLoudness):
     Tvar = constantes['TVAR']
     Tshort = constantes['TSHORT']
     Tlong = constantes['TLONG']
-    deltaT = 1 / constantes['SR_LEVEL'] * constantes['NL_ITER']
+    deltaT = 1 / (constantes['SR_LEVEL'] * constantes['NL_ITER'])
     P = (Tvar + Tlong) / (Tvar * Tshort)
     Q = 1 / (Tshort * Tvar)
     Lambda1 = -P / 2 + np.sqrt(P * P / 4 - Q)
@@ -323,15 +324,16 @@ def f_nl(coreLoudness):
         NlaLpDta['U2Last'] = 0
 
         for idxTime in range(np.shape(coreLoudness)[1] - 1):
-            Delta = (coreLoudness[idxCL][idxTime + 1] - coreLoudness[idxCL][idxTime]) / float(constantes['NL_ITER'])
-            Ui = coreLoudness[idxCL][idxTime]
-            coreLoudness[idxCL][idxTime] = f_nl_lp(Ui, NlaLpDta)
+            Delta = (coreLoudness[idxCL, idxTime + 1] - coreLoudness[idxCL, idxTime]) / float(constantes['NL_ITER'])
+            Ui = coreLoudness[idxCL, idxTime]
+            NlaLpDta = f_nl_lp(Ui, NlaLpDta)
+            coreLoudness[idxCL, idxTime] = NlaLpDta['UoLast']
             Ui += Delta
-            for idxI in range(constantes['NL_ITER']):
+            for idxI in range(constantes['NL_ITER'] - 1):
                 NlaLpDta = f_nl_lp(Ui, NlaLpDta)
                 Ui += Delta
-        NlaLpDta = f_nl_lp(coreLoudness[idxCL][idxTime + 1], NlaLpDta) # Actualizar diccionario
-        coreLoudness[idxCL][idxTime + 1] = NlaLpDta['UoLast']
+        NlaLpDta = f_nl_lp(coreLoudness[idxCL, idxTime + 1], NlaLpDta) # Actualizar diccionario
+        coreLoudness[idxCL, idxTime + 1] = NlaLpDta['UoLast']
     return coreLoudness
 
 
@@ -365,7 +367,7 @@ def f_nl_lp(Ui, NlaLpDta):
 
 
 def loudness_zwicker_temporal_weighting(loudness):
-    RATE = constantes['SR_LEVEL']
+    RATE = 2000
     Tau = 3.5 * 10**-3
     Filt1 = loudness_zwicker_lowpass_intp(loudness, Tau, RATE)
     Tau = 70 * 10**-3
@@ -380,12 +382,12 @@ def loudness_zwicker_lowpass_intp(loudness, Tau, RATE):
     Input = loudness.copy()
     Output = np.zeros(numSamples)
 
-    A1 = np.exp(-1 / (RATE * constantes['LP_ITERs'] * Tau))
+    A1 = np.exp(-1 / (RATE * constantes['LP_ITER'] * Tau))
     B0 = 1 - A1
 
-    for i in range(numSamples):
-        Output[i] = B0 * Input[i] + A1 * Y
-        Y = Output[i]
+    for idxTime in range(numSamples):
+        Output[idxTime] = B0 * Input[idxTime] + A1 * Y
+        Y = Output[idxTime]
         if idxTime < numSamples - 1:
             Xd = (Input[idxTime + 1] - Input[idxTime]) / constantes['LP_ITER']
             # Iteraciones internas / interpolacion
@@ -406,21 +408,21 @@ def loudness_ISO532(ThirdOctaveLevels, SoundFieldDiffuse):
     return Loudness, specLoudness, LoudnessBark, specLoudnessBark
 
 
-def loudness_ISO532_time(ThirdOctaveLevels, SoundFieldDiffuse):
-    constantes['DEC_FACTOR'] = int(RATE / constantes['SR_LEVEL'])
+def loudness_ISO532_time(ThirdOctaveLevels, SoundFieldDiffuse, RATE=48000, CHUNK=4800):
+    constantes['DEC_FACTOR_LEVEL'] = int(CHUNK / (RATE / constantes['SR_LEVEL']))
     numSampleLevel = np.shape(ThirdOctaveLevels)[1]
-    coreLoudness = no.zeros((21, numSampleLevel))
+    coreLoudness = np.zeros((21, numSampleLevel))
     for idxTime in range(numSampleLevel - 1):
-        ThirdOctaveIntens = f_corr_third_octave_intensities(ThirdOctaveLevels[:][idxTime])
+        ThirdOctaveIntens = f_corr_third_octave_intensities(ThirdOctaveLevels[:, idxTime])
         LCB = f_calc_lcbs(ThirdOctaveIntens)
-        coreLoudness[:][idxTime] = f_calc_core_loudness(ThirdOctaveLevels[:][idxTime], LCB, SoundFieldDiffuse)
-        coreLoudness[:][idxTime] = f_corr_loudness(coreLoudness[:][idxTime])
+        coreLoudness[:, idxTime] = f_calc_core_loudness(ThirdOctaveLevels[:, idxTime], LCB, SoundFieldDiffuse)
+        coreLoudness[:, idxTime] = f_corr_loudness(coreLoudness[:, idxTime])
+    coreLoudness = f_nl(coreLoudness)
     Loudness = np.zeros(numSampleLevel)
     specLoudness = np.zeros((constantes['N_BARK_BANDS'], numSampleLevel))
     for idxTime in range(numSampleLevel):
-        Loudness[idxTime], specLoudness[:][idxTime] = calc_slopes(coreLoudness[:, idxTime])
+        Loudness[idxTime], specLoudness[:, idxTime] = calc_slopes(coreLoudness[:, idxTime])
     
-    filtLoudness = loudness_zwicker_temporal_weighting(loudness)
-    Loudness = filtLoudness[::constantes['DEC_FACTOR']]
-    specLoudness = specLoudness[::constantes['DEC_FACTOR']]
+    filtLoudness = loudness_zwicker_temporal_weighting(Loudness)
+    print(np.shape(specLoudness))
     return Loudness, specLoudness
