@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
+# Andrea Castiella Aguirrezabala
+# Funciones para filtrado en bandas de un tercio de octava
+
 import numpy as np
 import math
-
 from scipy import signal
 
 # Coeficientes de referencia
@@ -8,8 +11,7 @@ CoefR = np.array([[1, 2, 1, 1, -2, 1],
                   [1, 0, -1, 1, -2, 1],
                   [1, -2, 1, 1, -2, 1]])
 
-# Coeficientes de los filtros. 28 bandas.
-
+# Coeficientes de los filtros. 28 bandas. ISO 532-1:2014
 # Banda 20 Hz
 Coef01 = np.array([[0, 0, 0, 0, -6.70260 * 10 ** (-4), 6.59453 * 10 ** (-4)],
                    [0, 0, 0, 0, -3.75071 * 10 ** (-4), 3.61926 * 10 ** (-4)],
@@ -184,11 +186,13 @@ CoeficientesArray = np.stack((Coef01, Coef02, Coef03, Coef04, Coef05, Coef06, Co
                               Coef19, Coef20, Coef21, Coef22, Coef23, Coef24, Coef25, Coef26, Coef27,
                               Coef28))
 
+# Ganancia para los tres filtrados
 GananciaFilt = np.array([(G1, G2, G3, G4, G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20,
                           G21, G22, G23, G24, G25, G26, G27, G28),
                          (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                          (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)])
 
+# Frecuencias centrales
 Frecuencias = np.array([25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600,
                         2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500])
 
@@ -201,6 +205,8 @@ constantes = {
     'N_FILTER_COEFS': 6
 }
 
+
+# Filtrado en bandas de tercio de octava sonidos estacionarios
 def ThirdOctaveBandFilter(frame, CHUNK=4800):
     # Filtrado
     Coeficientes = np.zeros(constantes['N_FILTER_COEFS'])
@@ -215,7 +221,10 @@ def ThirdOctaveBandFilter(frame, CHUNK=4800):
 
             Ganancia = GananciaFilt[idxFS][idxFB]
 
-            SignalOut = filter_2ndOrder(SignalIn, Coeficientes, CHUNK, Ganancia)
+            SignalOut = filter_2ndOrder(SignalIn,
+                                        Coeficientes, 
+                                        CHUNK, 
+                                        Ganancia)
             SignalIn = SignalOut
 
             if idxFS == 2:  # En el ultimo
@@ -223,11 +232,12 @@ def ThirdOctaveBandFilter(frame, CHUNK=4800):
     return ThirdOctaveBands
 
 
-def ThirdOctaveSPL(ThirdOctaveBands, CHUNK=4800, RATE=48000, TimeSkip=0, TimeVariyng=False):
+# Cálculo nivel SPL en bandas de tercio de octava
+def ThirdOctaveSPL(ThirdOctaveBands, CHUNK=4800, RATE=48000, TimeSkip=0, TimeVarying=False):
     # Valor pequeño para evitar que haya un 0 si no se capta señal
     ThirdOctaveLevel = np.zeros(np.shape(ThirdOctaveBands)[1])
 
-    if not TimeVariyng:
+    if not TimeVarying:
         # Suavizado
         NumSkip = np.floor(TimeSkip * RATE)
 
@@ -243,8 +253,9 @@ def ThirdOctaveSPL(ThirdOctaveBands, CHUNK=4800, RATE=48000, TimeSkip=0, TimeVar
     return ThirdOctaveLevel
 
 
+# Filtrado en bandas de tercio de octava sonidos variantes en el tiempo y cálculo niveles
 def ThirdOctaveLevelTime(frame, RATE=48000, CHUNK=4800):
-    constantes['DEC_FACTOR'] = int(RATE / constantes['SR_LEVEL'])
+    constantes['DEC_FACTOR'] = int(RATE / constantes['SR_LEVEL']) # para calculo mas rapido
     Coeficientes = np.zeros(constantes['N_FILTER_COEFS'])
 
     n_time = len(frame[::constantes['DEC_FACTOR']])  # Longitud frame cogiendo los valores con saltos de DEC_FACTOR
@@ -258,39 +269,44 @@ def ThirdOctaveLevelTime(frame, RATE=48000, CHUNK=4800):
                 Coeficientes[idxC] = CoefR[idxFS, idxC] - CoeficientesArray[idxFB, idxFS, idxC]
             
             Gain = GananciaFilt[idxFS][idxFB]
-            SignalOut = filter_2ndOrder(SignalIn, Coeficientes, CHUNK, Gain)
+            SignalOut = filter_2ndOrder(SignalIn, 
+                                        Coeficientes, 
+                                        CHUNK, 
+                                        Gain)
             SignalIn = SignalOut
 
         # Calculo frecuencia central del filtro
-        centerFreq = np.power(10, (idxFB - 16) / 10) * 1000
+        centerFreq = np.power(10, (idxFB - 16) / 10, dtype=float) * 1000
         # Elevar al cuadrado y suavizar
-        filtrada, prueba = f_square_and_smooth(SignalOut, centerFreq, RATE, CHUNK)
+        filtrada = f_square_and_smooth(SignalOut, centerFreq, RATE, CHUNK)
         
         # Calculo SPL y decimacion
         ThirdOctaveLevel[idxFB][:] = 10 * np.log10((np.array((filtrada[::constantes['DEC_FACTOR']])).flatten() + constantes['TINY_VALUE']) / constantes['I_REF'])
-
     return ThirdOctaveLevel, Frecuencias, time_axis
 
 
+# Elevar al cuadrado y suavizar
 def f_square_and_smooth(frame, centerFreq, RATE=48000, CHUNK=4800):
     Input = frame.copy()
     # Constante de tiempo dependiente de la frecuencia
     if centerFreq <= 1000:
-        Tau = 2 / (3 * centerFreq)
+        Tau = 2 / (3.0 * centerFreq)
     else:
-        Tau = 2 / (3 * 1000)
+        Tau = 2 / (3.0 * 1000.0)
     # Cuadrado
     Output = Input**2
-    prueba = Output
-    # 3 filtros suavizanres paso bajo
+    # 3 filtros suavizantes paso bajo
     a1 = np.exp(-1 / (RATE * Tau))
     b0 = 1 -a1
     for i in range(3):
-        #Output = filter_lowpass_1stOrder(Output, Tau, RATE, CHUNK)
-        Output = signal.lfilter([b0], [1, -a1], Output)
-    return Output, Tau
+        Output = filter_lowpass_1stOrder(Output, 
+                                         Tau, 
+                                         RATE, 
+                                         CHUNK)
+    return Output
 
 
+# Filtro paso bajo primer orden
 def filter_lowpass_1stOrder(frame, Tau, RATE=48000, CHUNK=4800):
     Y = 0
     Input = frame.copy()
@@ -305,6 +321,7 @@ def filter_lowpass_1stOrder(frame, Tau, RATE=48000, CHUNK=4800):
     return Output
 
 
+# Filtrado segundo orden
 def filter_2ndOrder(frame, Coef, CHUNK=4800, Gain=1):
     Input = frame.copy()
     Output = np.zeros(CHUNK)

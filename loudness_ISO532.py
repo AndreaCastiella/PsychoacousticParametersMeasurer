@@ -1,7 +1,9 @@
-# Loudness ISO 532
-# Metodo para sonidos estacionarios y variables con el tiempo
+# -*- coding: utf-8 -*-
+# Andrea Castiella Aguirrezabala
+# Loudness ISO 532-1:2014
+# Método para sonidos estacionarios y variables con el tiempo
+
 import numpy as np
-import filtertime
 
 constantes = {
     'SR_LEVEL': 2000,
@@ -17,7 +19,8 @@ constantes = {
     'SOUNDFILEDFREE': 0,
     'TSHORT': 0.005,
     'TLONG': 0.015,
-    'TVAR': 0.075
+    'TVAR': 0.075,
+    'DEC_FACTOR': 4 # Pasar de 0.5 ms a 2 ms
 }
 
 variablesBark = {
@@ -25,10 +28,12 @@ variablesBark = {
 }
 
 
+# Corrección para bajas frecuencias
 def f_corr_third_octave_intensities(ThirdOctaveLevel):
     ThirdOctaveIntens = np.zeros(11)
-    # Por numero de LCB BANDS de 25 a 250 Hz
+    # Por número de LCB BANDS de 25 a 250 Hz
     for idxIntens in range(constantes['N_LCB_BANDS']):
+        # Ponderación de los niveles de un tercio de octava para bandas entre 25 y 250 Hz
         DLL = np.array([[-32, -24, -16, -10, -5, 0, -7, -3, 0, -2, 0],
                         [-29, -22, -15, -10, -4, 0, -7, -2, 0, -2, 0],
                         [-27, -19, -14, -9, -4, 0, -6, -2, 0, -2, 0],
@@ -37,8 +42,10 @@ def f_corr_third_octave_intensities(ThirdOctaveLevel):
                         [-20, -14, -10, -6, -3, 0, -4, -1, 0, -1, 0],
                         [-18, -12, -9, -6, -2, 0, -3, -1, 0, -1, 0],
                         [-15, -10, -8, -4, -2, 0, -3, -1, 0, -1, 0]])
+        # Rangos de nivel para ponderación de los niveles
         RAP = np.array([45, 55, 65, 71, 80, 90, 100, 120])
 
+        # Corrección primeras 11 bandas 
         idxLevelRange = 0
         while (ThirdOctaveLevel[idxIntens] > RAP[idxLevelRange] - DLL[idxLevelRange][idxIntens]) and (
                 idxLevelRange < constantes['N_RAP_RANGES'] - 1):
@@ -50,6 +57,7 @@ def f_corr_third_octave_intensities(ThirdOctaveLevel):
 
 # Niveles de las primeras bandas criticas
 def f_calc_lcbs(ThirdOctaveIntens):
+    # Aproximación a bandas críticas por debajo de 300 Hz.
     LCB = np.zeros(3)
     pcbi = np.zeros(3)
     for idxIntens in range(6):
@@ -64,14 +72,20 @@ def f_calc_lcbs(ThirdOctaveIntens):
     return LCB
 
 
+# Cálculo del core loudness
 def f_calc_core_loudness(ThirdOctaveSPL, LCB, SoundFieldDiffuse=constantes['SOUNDFIELDDIFFUSE']):
     coreLoudness = np.zeros(constantes['N_CORE_LOUDN'])
     criticalBandLevels = np.zeros(constantes['N_CORE_LOUDN'])
+    # Características de transmisión del oído humano
     A0 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.5, -1.6, -3.2, -5.4, -5.6, -4.0, -1.5, 2.0, 5.0, 12.0])
+    # Diferencia de nivel para campo difuso
     DDF = np.array([0, 0, 0.5, 0.9, 1.2, 1.6, 2.3, 2.8, 3.0, 2.0, 0, -1.4, -2.0, -1.9, -1.0, 0.5, 3.0, 4.0, 4.3, 4.0])
+    # Umbrales de silencio
     LTQ = np.array([30, 18, 12, 8, 7, 6, 5, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
+    # Corrección por aproximación
     DCB = np.array([-0.25, -0.6, -0.8, -0.8, -0.5, 0, 0.5, 1.1, 1.5, 1.7, 1.8, 1.8, 1.7, 1.6, 1.4, 1.2, 0.8, 0.5, 0,
                     -0.5])
+    # Factor umbral
     S = 0.25
 
     for idxCL in range(constantes['N_CORE_LOUDN'] - 1):
@@ -83,11 +97,11 @@ def f_calc_core_loudness(ThirdOctaveSPL, LCB, SoundFieldDiffuse=constantes['SOUN
         Le = Le - A0[idxCL]
         coreLoudness[idxCL] = 0
 
-        # Correccion por campo difuso
+        # Corrección por campo difuso
         if SoundFieldDiffuse == 1:
             Le = Le + DDF[idxCL]
 
-        # Correcion si se supera el umbral
+        # Correción si se supera el umbral de silencio
         if Le > LTQ[idxCL]:
             Le = Le - DCB[idxCL]
             C1 = 0.0635 * 10 ** (0.025 * LTQ[idxCL])
@@ -99,7 +113,7 @@ def f_calc_core_loudness(ThirdOctaveSPL, LCB, SoundFieldDiffuse=constantes['SOUN
     return coreLoudness
 
 
-# Correccion del loudness especifico de la banda mas baja por silencio en esta banda
+# Corrección del loudness específico de la banda más baja por silencio en esta banda
 def f_corr_loudness(coreLoudness):
     CorrCL = 0.4 + 0.32 * np.float(np.power(coreLoudness[0], 0.2))
     if CorrCL < 1:
@@ -107,7 +121,7 @@ def f_corr_loudness(coreLoudness):
     return coreLoudness
 
 
-# Calculo del loudness especifico con saltos Bark 0.1
+# Cálculo del loudness específico con saltos Bark 0.1
 def calc_slopes(coreLoudness):
     N1 = 0
     Z = 0.1
@@ -117,9 +131,10 @@ def calc_slopes(coreLoudness):
     Loudness = 0
     specLoudness = np.zeros(constantes['N_BARK_BANDS'])
 
+    # Relación bandas tercio de octava y Bark
     ZUP = np.array([0.9, 1.8, 2.8, 3.5, 4.4, 5.4, 6.6, 7.9, 9.2, 10.6, 12.3, 13.8, 15.2, 16.7, 18.1, 19.3, 20.6, 21.8,
                     22.7, 23.6, 24.0])
-
+    # Inclinación de la pendiente
     USL = np.array([[13.0, 8.2, 6.3, 5.5, 5.5, 5.5, 5.5, 5.5],
                     [9.0, 7.5, 6.0, 5.1, 4.5, 4.5, 4.5, 4.5],
                     [7.8, 6.7, 5.6, 4.9, 4.4, 3.9, 3.9, 3.9],
@@ -138,10 +153,11 @@ def calc_slopes(coreLoudness):
                     [0.12, 0.11, 0.1, 0.08, 0.08, 0.08, 0.08, 0.08],
                     [0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.05],
                     [0.06, 0.05, 0.03, 0.02, 0.02, 0.02, 0.02, 0.02]])
-
+    # Rango del valor de la sonoridad
     RNS = np.array([21.5, 18.0, 15.1, 11.5, 9.0, 6.1, 4.4, 3.1, 2.13, 1.36, 0.82, 0.42, 0.3, 0.22, 0.15, 0.1, 0.035,
                     0.0])
 
+    # Cálculo de sonoridad específica y total
     for idxCL in range(constantes['N_CORE_LOUDN']):
         idxCBN = idxCL - 1
         ZUP[idxCL] += 0.0001
@@ -196,7 +212,7 @@ def calc_slopes(coreLoudness):
     return Loudness, specLoudness
 
 
-# Calculo del loudness especifico
+# Cálculo del loudness específico con saltos Bark 1
 def calc_slopes_Bark(coreLoudness):
     N1 = 0
     Z = 1
@@ -206,9 +222,10 @@ def calc_slopes_Bark(coreLoudness):
     Loudness = 0
     specLoudness = np.zeros(variablesBark['N_BARK_BANDS'])
 
+    # Relación bandas tercio de octava y Bark
     ZUP = np.array([0.9, 1.8, 2.8, 3.5, 4.4, 5.4, 6.6, 7.9, 9.2, 10.6, 12.3, 13.8, 15.2, 16.7, 18.1, 19.3, 20.6, 21.8,
                     22.7, 23.6, 24.0])
-
+    # Inclinación de la pendiente
     USL = np.array([[13.0, 8.2, 6.3, 5.5, 5.5, 5.5, 5.5, 5.5],
                     [9.0, 7.5, 6.0, 5.1, 4.5, 4.5, 4.5, 4.5],
                     [7.8, 6.7, 5.6, 4.9, 4.4, 3.9, 3.9, 3.9],
@@ -227,10 +244,11 @@ def calc_slopes_Bark(coreLoudness):
                     [0.12, 0.11, 0.1, 0.08, 0.08, 0.08, 0.08, 0.08],
                     [0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.05],
                     [0.06, 0.05, 0.03, 0.02, 0.02, 0.02, 0.02, 0.02]])
-
+    # Rango del valor de la sonoridad
     RNS = np.array([21.5, 18.0, 15.1, 11.5, 9.0, 6.1, 4.4, 3.1, 2.13, 1.36, 0.82, 0.42, 0.3, 0.22, 0.15, 0.1, 0.035,
                     0.0])
 
+    # Cálculo de sonoridad específica y total
     for idxCL in range(constantes['N_CORE_LOUDN']):
         idxCBN = idxCL - 1
         ZUP[idxCL] += 0.0001
@@ -285,14 +303,15 @@ def calc_slopes_Bark(coreLoudness):
     return Loudness, specLoudness
 
 
+# Conversión sonos a fonos
 def sone2phon(Loudness):
     if Loudness >= 1:
         LN = 40 + 33.22 * np.log10(Loudness)
     else:
         LN = 40 * np.power(Loudness + 0.0005, 0.35)
-    return round(LN, 1)
+    return LN
 
-# Para sonidos variables en el tiempo
+# Decaimiento temporal no lineal
 def f_nl(coreLoudness):
     # Inicializacion variables
     Tvar = constantes['TVAR']
@@ -337,6 +356,7 @@ def f_nl(coreLoudness):
     return coreLoudness
 
 
+# Actualización parámetros para cálculo de decaimiento temporal
 def f_nl_lp(Ui, NlaLpDta):
     if Ui < NlaLpDta['UoLast']:     # Caso 1
         if NlaLpDta['UoLast'] > NlaLpDta['U2Last']:     # Caso 1.1
@@ -366,17 +386,23 @@ def f_nl_lp(Ui, NlaLpDta):
     return NlaLpDta
 
 
+# Ponderación temporal
 def loudness_zwicker_temporal_weighting(loudness):
     RATE = 2000
     Tau = 3.5 * 10**-3
-    Filt1 = loudness_zwicker_lowpass_intp(loudness, Tau, RATE)
+    Filt1 = loudness_zwicker_lowpass_intp(loudness, 
+                                          Tau, 
+                                          RATE)
     Tau = 70 * 10**-3
-    Filt2 = loudness_zwicker_lowpass_intp(loudness, Tau, RATE)
+    Filt2 = loudness_zwicker_lowpass_intp(loudness, 
+                                          Tau, 
+                                          RATE)
     Loudness = 0.47 * Filt1 + 0.53 * Filt2
     return Loudness
 
 
-def loudness_zwicker_lowpass_intp(loudness, Tau, RATE):
+# Filtro paso bajo e interpolación para obtenr frecuancia de muetreo de 48 kHz
+def loudness_zwicker_lowpass_intp(loudness, Tau, RATE=2000):
     numSamples = np.shape(loudness)[0]
     Y = 0
     Input = loudness.copy()
@@ -397,32 +423,35 @@ def loudness_zwicker_lowpass_intp(loudness, Tau, RATE):
     return Output
 
 
-# Funcion principal
+# Función principal sonidos estacionarios
 def loudness_ISO532(ThirdOctaveLevels, SoundFieldDiffuse):
     ThirdOctaveIntens = f_corr_third_octave_intensities(ThirdOctaveLevels)
     LCB = f_calc_lcbs(ThirdOctaveIntens)
-    coreLoudness = f_calc_core_loudness(ThirdOctaveLevels, LCB, SoundFieldDiffuse)
+    coreLoudness = f_calc_core_loudness(ThirdOctaveLevels, 
+                                        LCB, 
+                                        SoundFieldDiffuse)
     coreLoudness = f_corr_loudness(coreLoudness)
     Loudness, specLoudness = calc_slopes(coreLoudness)
     LoudnessBark, specLoudnessBark = calc_slopes_Bark(coreLoudness)
     return Loudness, specLoudness, LoudnessBark, specLoudnessBark
 
 
+# Función principal sonidos variantes en el tiempo
 def loudness_ISO532_time(ThirdOctaveLevels, SoundFieldDiffuse, RATE=48000, CHUNK=4800):
-    constantes['DEC_FACTOR_LEVEL'] = int(CHUNK / (RATE / constantes['SR_LEVEL']))
     numSampleLevel = np.shape(ThirdOctaveLevels)[1]
     coreLoudness = np.zeros((21, numSampleLevel))
-    for idxTime in range(numSampleLevel - 1):
+    for idxTime in range(numSampleLevel):
         ThirdOctaveIntens = f_corr_third_octave_intensities(ThirdOctaveLevels[:, idxTime])
         LCB = f_calc_lcbs(ThirdOctaveIntens)
-        coreLoudness[:, idxTime] = f_calc_core_loudness(ThirdOctaveLevels[:, idxTime], LCB, SoundFieldDiffuse)
+        coreLoudness[:, idxTime] = f_calc_core_loudness(ThirdOctaveLevels[:, idxTime], 
+                                                        LCB, 
+                                                        SoundFieldDiffuse)
         coreLoudness[:, idxTime] = f_corr_loudness(coreLoudness[:, idxTime])
     coreLoudness = f_nl(coreLoudness)
     Loudness = np.zeros(numSampleLevel)
-    specLoudness = np.zeros((constantes['N_BARK_BANDS'], numSampleLevel))
+    specLoudness = np.zeros((constantes['N_BARK_BANDS'], 
+                            numSampleLevel))
     for idxTime in range(numSampleLevel):
         Loudness[idxTime], specLoudness[:, idxTime] = calc_slopes(coreLoudness[:, idxTime])
-    
     filtLoudness = loudness_zwicker_temporal_weighting(Loudness)
-    print(np.shape(specLoudness))
-    return Loudness, specLoudness
+    return filtLoudness[::constantes['DEC_FACTOR']], specLoudness[:, ::constantes['DEC_FACTOR']]
